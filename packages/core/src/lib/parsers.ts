@@ -98,6 +98,6 @@ export const Parsers = {
         } , parser[head as keyof T].parse(o[head]).map(a => ({key: head, value: a})) as ParserResult<unknown>)
 
         // eslint-disable-next-line prefer-spread,functional/prefer-readonly-type
-        return results.map((r: { key: string, value: unknown}[]) => [].concat.apply([], r).reduce((p, n) => Object.assign({}, p, {[n.key]: n.value}), {})) as ParserResult<T>
+        return results.map((r: { key: string, value: unknown}[]) => r.flat(Infinity).reduce((p, n) => Object.assign({}, p, {[n.key]: n.value}), {})) as ParserResult<T>
     })
 }

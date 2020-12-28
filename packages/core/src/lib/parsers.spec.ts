@@ -155,16 +155,30 @@ describe("Parsers", () => {
             const parser = Parsers.for({
                 name: Parsers.string,
                 age: Parsers.number,
-                isMale: Parsers.bool.optional(true)
+                isMale: Parsers.bool,
+                occupation: Parsers.for({
+                    title: Parsers.string,
+                    startDate: Parsers.number
+                })
             })
             const a = parser.parse({
-                name: "Fred",
-                age: 30
+                name: "Jolene",
+                age: 30,
+                isMale: false,
+                occupation: {
+                    title: "Devops Manager",
+                    startDate: 180000000000
+                }
             })
             ParserResult.match(a)({
                 valid: a => expect(a.result).toEqual({
-                    name: "Fred",
-                    age: 30
+                    name: "Jolene",
+                    age: 30,
+                    isMale: false,
+                    occupation: {
+                        title: "Devops Manager",
+                        startDate: 180000000000
+                    }
                 }),
                 invalid: e => expect(e).toBeFalsy()
             })
