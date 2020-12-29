@@ -27,6 +27,14 @@ describe("Parser", () => {
             invalid: e => expect(e).toBeFalsy()
         })
     })
+    it("should return valid for defined value with a optional parser", () => {
+        const parser = Parsers.string.optional(false)
+        const a = parser.parse("a")
+        ParserResult.match(a)({
+            valid: a => expect(a.result).toEqual("a"),
+            invalid: e => expect(e).toBeFalsy()
+        })
+    })
 
     it("should return invalid for undefined with a non-optional parser", () => {
         const parser = Parsers.string.optional(false)
@@ -130,7 +138,7 @@ describe("Parser", () => {
     it("should compose parsers", () => {
         const stringParser = Parser.for(a => ParserResult.valid(String(a)))
         const intParser = Parser.for((a: string) => ParserResult.try(() => parseInt(a)))
-        const composed = stringParser.compose(intParser)
+        const composed = stringParser.then(intParser)
         const one = composed.parse("1")
         ParserResult.match(one)({
             valid: a => expect(a.result).toEqual(1),
@@ -140,11 +148,34 @@ describe("Parser", () => {
     it("should compose parsers passing initial errors to result", () => {
         const stringParser = Parser.for(a => ParserResult.invalid({head: {reason: "Error 1", originalValue: undefined}, tail:[]}))
         const intParser = Parser.for((a: string) => ParserResult.try(() => parseInt(a)))
-        const composed = stringParser.compose(intParser)
+        const composed = stringParser.then(intParser)
         const one = composed.parse("1")
         ParserResult.match(one)({
             valid: a => expect(a.result).toBeFalsy(),
             invalid: e => expect(e.errors.head.reason).toEqual("Error 1")
+        })
+    })
+
+    it("should build a Union type of parsers", () => {
+        const stringOrNumberParser = Parsers.string.or(Parsers.number)
+        const oneString = stringOrNumberParser.parse("1")
+        ParserResult.match(oneString)({
+            valid: a => expect(a.result).toEqual("1"),
+            invalid: e => expect(e).toBeFalsy()
+        })
+        const one = stringOrNumberParser.parse(1)
+        ParserResult.match(one)({
+            valid: a => expect(a.result).toEqual(1),
+            invalid: e => expect(e).toBeFalsy()
+        })
+    })
+
+    it("should return an invalid result for union parser that does not satisfy union constraint", () => {
+        const stringOrNumberParser = Parsers.string.or(Parsers.number)
+        const bool = stringOrNumberParser.parse(false)
+        ParserResult.match(bool)({
+            valid: a => expect(a.result).toBeFalsy(),
+            invalid: e => expect(e).toBeTruthy()
         })
     })
     
