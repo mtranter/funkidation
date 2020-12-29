@@ -8,7 +8,8 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "jest --coverage",
+    "test": "yarn lint && yarn test:unit ",
+    "test:unit": "jest --coverage",
     "lint": "eslint ./src --ext .js,.jsx,.ts,.tsx"
   },
   "devDependencies": {

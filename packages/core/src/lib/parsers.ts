@@ -1,5 +1,3 @@
-import { type } from "os"
-
 export type NonEmptyList<T> = { readonly head: T, readonly tail: readonly T[] }
 export type ParserError = { readonly originalValue: unknown, readonly reason: string }
 type Functor<A> = { readonly map: <B>(f: (a: A) => B) => ParserResult<B> }
