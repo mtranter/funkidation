@@ -1,7 +1,7 @@
 export type NonEmptyList<T> = { readonly head: T, readonly tail: readonly T[] }
 export type ParserError = { readonly originalValue: unknown, readonly reason: string }
-type Functor<A> = { readonly map: <B>(f: (a: A) => B) => Functor<B> }
-type Zip<A> = Functor<A> & { readonly product: <B>(f: Zip<B>) => Zip<readonly [A, B]> }
+type Functor<A> = { readonly map: <B>(f: (a: A) => B) => ParserResult<B> }
+type Zip<A> = Functor<A> & { readonly product: <B>(f: ParserResult<B>) => ParserResult<readonly [A, B]> }
 export type ParserErrors = NonEmptyList<ParserError>
 export type ParserSuccess<T> = { readonly result: T, readonly __isError: false } & Zip<T>
 export type ParserFailure<T> = { readonly errors: ParserErrors, readonly __isError: true } & Zip<T>
@@ -16,6 +16,15 @@ type ParserFor<O, I = unknown> = {
     readonly optional: <B extends boolean>(isOptional: B) => IsOptionalParser<O, B>
 }
 
+const flatten = <T>(arr: readonly (readonly T[] | T)[]): readonly T[] => {
+    const cast = arr as readonly T[]
+    return cast.length ? (() => {
+        const [head, ...tail] = cast
+
+        return (Array.isArray(head) ? flatten(head) : [head]).concat(flatten(tail))
+    })() : cast
+}
+
 export const ParserResult = {
     isSuccess: <(<T>(pr: ParserResult<T>) => pr is ParserSuccess<T>)>(pr => !pr.__isError),
     try: <A>(f: () => A): ParserResult<A> => {
@@ -28,7 +37,7 @@ export const ParserResult = {
         }
     },
     when: (cond: boolean) => <A>(ifTrue: A, ifFalse: ParserError): ParserResult<A> => {
-        return cond ? ParserResult.valid(ifTrue) : ParserResult.invalid({head: ifFalse, tail:[]})
+        return cond ? ParserResult.valid(ifTrue) : ParserResult.invalid({ head: ifFalse, tail: [] })
     },
     valid: <A>(a: A): ParserResult<A> => ({
         __isError: false,
@@ -56,7 +65,7 @@ export const ParserResult = {
 
 export const Parser = {
     for: <O, I = unknown>(f: (a: I) => ParserResult<O>): ParserFor<O, I> => Object.assign({}, { parse: f }, {
-        map: <B>(fab: (a: O) => B): ParserFor<B> => Parser.for<B, I>(u => f(u).map(fab) as ParserResult<B>),
+        map: <B>(fab: (a: O) => B): ParserFor<B> => Parser.for<B, I>(u => f(u).map(fab)),
         subflatMap: <B>(fb: (t: O) => ParserResult<B>) => Parser.for<B, I>(u => ParserResult.match<O, ParserResult<B>>(f(u))({
             invalid: e => e as unknown as ParserFailure<B>,
             valid: v => fb(v.result)
@@ -65,18 +74,18 @@ export const Parser = {
             invalid: e => e as unknown as ParserFailure<B>,
             valid: v => other.parse(v.result)
         })),
-        optional: <B extends boolean>(b: B) => (b ? 
-            Parser.for<O | undefined, I>(a => a ? 
-                f(a) : 
-                ParserResult.valid(undefined)) : 
+        optional: <B extends boolean>(b: B) => (b ?
+            Parser.for<O | undefined, I>(a => a ?
+                f(a) :
+                ParserResult.valid(undefined)) :
             Parser.for<O, I>(a => !a ? ParserResult.invalid<Exclude<O, null | undefined>>({ head: { originalValue: undefined, reason: "Mandatory value not present" }, tail: [] }) : f(a))) as IsOptionalParser<O, B>
     })
 }
 
 export const Parsers = {
-    string: Parser.for<string>(a => ParserResult.when(typeof a === 'string' || a instanceof String)(a as string, { originalValue: a, reason: `Expected string. Got: ${a}`})),
+    string: Parser.for<string>(a => ParserResult.when(typeof a === 'string' || a instanceof String)(a as string, { originalValue: a, reason: `Expected string. Got: ${a}` })),
     toString: Parser.for(a => ParserResult.valid(a.toString())),
-    number: Parser.for<number>(a => ParserResult.when(typeof a === 'number')(a as number, { originalValue: a, reason: `Expected number. Got: ${a}`})),
+    number: Parser.for<number>(a => ParserResult.when(typeof a === 'number')(a as number, { originalValue: a, reason: `Expected number. Got: ${a}` })),
     parseInt: Parser.for<number, string>(a => {
         const i = parseInt(a)
         return ParserResult.when(!isNaN(i))(i, { originalValue: a, reason: `Expected valid int. Got: ${a}` })
@@ -85,19 +94,22 @@ export const Parsers = {
         const i = parseFloat(a)
         return ParserResult.when(!isNaN(i))(i, { originalValue: a, reason: `Expected valid float. Got: ${a}` })
     }),
-    bool: Parser.for<boolean>(a => ParserResult.when(typeof a === 'boolean')(a as boolean, { originalValue: a, reason: `Expected boolean. Got: ${a}`})),
+    bool: Parser.for<boolean>(a => ParserResult.when(typeof a === 'boolean')(a as boolean, { originalValue: a, reason: `Expected boolean. Got: ${a}` })),
     parseBool: Parser.for<boolean, string>(a => {
         const i = a == "true" ? true : a == "false" ? false : undefined
         return ParserResult.when(i !== undefined)(i, { originalValue: a, reason: `Expected valid bool. Got: ${a}` })
     }),
     for: <T>(parser: { readonly [k in keyof T]: ParserFor<T[k]> }): ParserFor<T, unknown> => Parser.for(o => {
+        type KeyValuePair = { readonly key: string, readonly value: T[keyof T] }
         const [head, ...tail] = Object.keys(parser)
-        const results = tail.reduce((p, n) => {
+        const results = tail.reduce<ParserResult<readonly KeyValuePair[]>>((p, n) => {
             const k = n as keyof T
-            return p.product(parser[k].parse(o[k]).map(a => ({key: n, value: a})) as ParserResult<unknown>) as ParserResult<unknown>
-        } , parser[head as keyof T].parse(o[head]).map(a => ({key: head, value: a})) as ParserResult<unknown>)
+            const next = parser[k].parse(o[k]).map<KeyValuePair>(a => ({ key: n, value: a }))
+            const product = p.product(next)
+            const result = product.map(t => flatten(t))
+            return result
+        }, parser[head as keyof T].parse(o[head]).map<readonly KeyValuePair[]>(a => ([{ key: head, value: a }])))
 
-        // eslint-disable-next-line prefer-spread,functional/prefer-readonly-type
-        return results.map((r: { key: string, value: unknown}[]) => r.flat(Infinity).reduce((p, n) => Object.assign({}, p, {[n.key]: n.value}), {})) as ParserResult<T>
+        return results.map((r) => r.reduce((p, n) => Object.assign({}, p, { [n.key]: n.value }), {} as T))
     })
 }
