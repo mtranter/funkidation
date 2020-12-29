@@ -155,7 +155,7 @@ describe("Parsers", () => {
             const parser = Parsers.for({
                 name: Parsers.string,
                 age: Parsers.number,
-                isMale: Parsers.bool.optional(false),
+                isMale: Parsers.bool.optional(true),
                 occupation: Parsers.for({
                     title: Parsers.string,
                     startDate: Parsers.number
