@@ -1,6 +1,7 @@
 {
   "name": "root",
   "private": true,
+  "license": "MIT",
   "devDependencies": {
     "husky": "^4.3.6",
     "lerna": "^3.22.1"
@@ -8,7 +9,8 @@
   "scripts": {
     "build": "lerna run build",
     "test": "lerna run test",
-    "lint": "lerna run lint"
+    "lint": "lerna run lint",
+    "prepare-release": "lerna run prepare-release"
   },
   "husky": {
     "hooks": {
