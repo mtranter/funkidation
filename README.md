@@ -4,8 +4,12 @@
 
 A typescript typesafe typecurious parsing/validating library.
 
-### Usage.
+### Motivation.
+Parse raw Javascript objects into higher level domain objects with real types that can be trusted.
 
+Make full use of Typescript's type inference to do away with unnecessary type declarations, while maintaining statically typed goodness.
+
+### Usage:
 ```typescript
 
 describe("#for", () => {
