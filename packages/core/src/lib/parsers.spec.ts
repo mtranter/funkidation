@@ -1,5 +1,4 @@
-import { types } from 'util'
-import { Parser, Parsers, ParserResult } from './parsers'
+import { ParserFor, Parsers, ParserResult } from './parsers'
 
 describe("Parsers", () => {
     describe("#string", () => {
@@ -225,17 +224,18 @@ describe("Parsers", () => {
     describe("#for", () => {
 
         it("should return a valid parsed object", () => {
-            const parser = Parsers.for({
+            
+            const personParser = Parsers.for({
                 name: Parsers.string,
                 age: Parsers.number,
-                isMale: Parsers.bool.optional(true).or(Parsers.parseBool),
+                isMale: Parsers.bool.or(Parsers.parseBool).optional(),
                 occupation: Parsers.for({
                     title: Parsers.string,
                     startDate: Parsers.string.then(Parsers.parseDate)
                 })
             })
 
-            const result = parser.parse({
+            const result = personParser.parse({
                 name: "Jolene",
                 age: 30,
                 isMale: "false",
@@ -259,9 +259,11 @@ describe("Parsers", () => {
             })
         })
         it("should return a valid result for recursive types", () => {
-            const languageParser = Parsers.for({
+            type Language = { readonly name: string, readonly influencedBy?: readonly Language[] }
+
+            const languageParser: ParserFor<Language> = Parsers.for({
                 name: Parsers.string,
-                influencedBy: Parsers.array(() => languageParser).optional(true)
+                influencedBy: Parsers.array(() => languageParser).optional()
             })
             const typescript = {
                 name: "Typescript",
@@ -273,7 +275,6 @@ describe("Parsers", () => {
                     influencedBy: [{ name: "Haskell" }, { name: "ML" }]
                 }]
             }
-            type Language = { name: string, influencedBy?: Language[]}
             
             const result: ParserResult<Language> = languageParser.parse(typescript)
             ParserResult.match(result)({

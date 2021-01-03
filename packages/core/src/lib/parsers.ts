@@ -1,19 +1,22 @@
-export type NonEmptyList<T> = { readonly head: T, readonly tail: readonly T[] }
-export type ParserError = { readonly originalValue: unknown, readonly reason: string }
-type Functor<A> = { readonly map: <B>(f: (a: A) => B) => ParserResult<B> }
-type Zip<A> = Functor<A> & { readonly product: <B>(f: ParserResult<B>) => ParserResult<readonly [A, B]> }
-export type ParserErrors = NonEmptyList<ParserError>
-export type ParserSuccess<T> = { readonly result: T, readonly __isError: false } & Zip<T>
-export type ParserFailure<T> = { readonly errors: ParserErrors, readonly __isError: true } & Zip<T>
-export type ParserResult<T> = ParserSuccess<T> | ParserFailure<T>
-type IsOptionalParser<T, B extends boolean> = B extends true ? ParserFor<T | undefined> : ParserFor<Exclude<T, null | undefined>>
+import { NonEmptyArray, cons, concat } from "./non-empty-array"
 
-type ParserFor<O, I = unknown> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ParserError = { readonly originalValue: any, readonly reason: string }
+export type ParserErrors = NonEmptyArray<ParserError>
+export type ParserSuccess<T> = { readonly result: T, readonly __isError: false }
+export type ParserFailure = { readonly errors: ParserErrors, readonly __isError: true }
+export type ParserResult<T> = ParserSuccess<T> | ParserFailure
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ParsedType<T> =  T extends ParserFor<infer X> ? X : string
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ParserFor<O, I = any> = {
     readonly parse: (a: I) => ParserResult<O>
     readonly map: <U>(f: (t: O) => U) => ParserFor<U, I>
     readonly subflatMap: <U>(f: (t: O) => ParserResult<U>) => ParserFor<U, I>
+    readonly flatMap: <U>(f: (t: O) => ParserFor<U>) => ParserFor<U, I>
     readonly then: <U>(other: ParserFor<U, O>) => ParserFor<U, I>
-    readonly optional: <B extends boolean>(isOptional: B) => IsOptionalParser<O, B>
+    readonly optional: () => ParserFor<O | undefined, I>
+    readonly required: () => ParserFor<Exclude<O, undefined | null>, I>
     readonly or: <U>(other: ParserFor<U, I>) => ParserFor<O | U, I>
 }
 
@@ -30,7 +33,6 @@ type Factory<T> = T | (() => T)
 const isFactory = <T>(t: Factory<T>): t is () => T => typeof t === 'function'
 const fromFactory = <T>(t: Factory<T>): T => isFactory(t) ? t() : t
 
-const nelAppend = <T>(f1: NonEmptyList<T>, f2: NonEmptyList<T>): NonEmptyList<T> => ({ head: f1.head, tail: f1.tail.concat(f2.head, ...f2.tail)})
 
 export const ParserResult = {
     isSuccess: <(<T>(pr: ParserResult<T>) => pr is ParserSuccess<T>)>(pr => !pr.__isError),
@@ -40,98 +42,110 @@ export const ParserResult = {
             const a = f()
             return ParserResult.valid(a)
         } catch (e) {
-            return ParserResult.invalid({ head: (e.message || e.toString()), tail: [] })
+            const { message }: { readonly message: string } = e
+            return ParserResult.invalid(cons({ reason: (message || e.toString()), originalValue: undefined }))
         }
     },
     when: (cond: boolean) => <A>(ifTrue: A, ifFalse: ParserError): ParserResult<A> => {
-        return cond ? ParserResult.valid(ifTrue) : ParserResult.invalid({ head: ifFalse, tail: [] })
+        return cond ? ParserResult.valid(ifTrue) : ParserResult.invalid(cons(ifFalse))
     },
     valid: <A>(a: A): ParserResult<A> => ({
         __isError: false,
-        result: a,
-        map: (f) => ParserResult.valid(f(a)),
-        product: <B>(prb: ParserResult<B>) => ParserResult.match<B, ParserResult<readonly [A, B]>>(prb)({
-            valid: (b) => ParserResult.valid([a, b.result]),
-            invalid: (e) => ParserResult.invalid<readonly [A, B]>(e.errors)
-        })
+        result: a
     }),
     invalid: <A>(errors: ParserErrors): ParserResult<A> => ({
         __isError: true,
-        errors: errors,
-        map: () => ParserResult.invalid(errors),
-        product: <B>(prb) => ParserResult.match<B, ParserResult<readonly [A, B]>>(prb)({
-            valid: () => ParserResult.invalid(errors),
-            invalid: e => ParserResult.invalid(nelAppend(errors, e.errors))
+        errors: errors
+    }),
+    map: <A>(pr: ParserResult<A>) => <B>(f: (a: A) => B): ParserResult<B> => ParserResult.match(pr)({
+        valid: v => ParserResult.valid(f(v.result)),
+        invalid: v => v
+    }),
+    product: <A>(pra: ParserResult<A>) => <B>(prb: ParserResult<B>): ParserResult<readonly [A, B]> => ParserResult.match(pra)({
+        valid: a => ParserResult.match(prb)({
+            valid: (b) => ParserResult.valid([a.result, b.result]),
+            invalid: (e) => e
+        }),
+        invalid: e => ParserResult.match(prb)({
+            valid: () => e,
+            invalid: ee => ParserResult.invalid<readonly [A, B]>(concat(e.errors, ee.errors))
         })
     }),
-    match: <A, B>(pr: ParserResult<A>) => (matchers: {
+    match: <A>(pr: ParserResult<A>) => <B>(matchers: {
         readonly valid: (a: ParserSuccess<A>) => B,
-        readonly invalid: (pe: ParserFailure<A>) => B
+        readonly invalid: (pe: ParserFailure) => B
     }): B => ParserResult.isSuccess(pr) ? matchers.valid(pr) : matchers.invalid(pr)
 }
 
-export const Parser = {
-    for: <O, I = unknown>(f: (a: I) => ParserResult<O>): ParserFor<O, I> => Object.assign({}, { parse: f }, {
-        map: <B>(fab: (a: O) => B): ParserFor<B> => Parser.for<B, I>(u => f(u).map(fab)),
-        subflatMap: <B>(fb: (t: O) => ParserResult<B>) => Parser.for<B, I>(u => ParserResult.match<O, ParserResult<B>>(f(u))({
-            invalid: e => e as unknown as ParserFailure<B>,
-            valid: v => fb(v.result)
-        })),
-        then: <B>(other: ParserFor<B, O>) => Parser.for<B, I>(u => ParserResult.match<O, ParserResult<B>>(f(u))({
-            invalid: e => e as unknown as ParserFailure<B>,
-            valid: v => other.parse(v.result)
-        })),
-        or: <B>(other: ParserFor<B, I>) => Parser.for<O | B, I>(u => ParserResult.match<O, ParserResult<O | B>>(f(u))({
-            invalid: e => ParserResult.match<B, ParserResult<O | B>>(other.parse(u))({
-                invalid: eo => ParserResult.invalid(nelAppend(e.errors, eo.errors)),
-                valid: vo => vo
-            }),
-            valid: v => v
-        })),
-        optional: <B extends boolean>(b: B) => (b ?
-            Parser.for<O | undefined, I>(a => a ?
-                f(a) :
-                ParserResult.valid(undefined)) :
-            Parser.for<O, I>(a => !a ? ParserResult.invalid<Exclude<O, null | undefined>>({ head: { originalValue: undefined, reason: "Mandatory value not present" }, tail: [] }) : f(a))) as IsOptionalParser<O, B>
-    })
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const parserFor = <O, I = any>(f: (a: I) => ParserResult<O>): ParserFor<O, I> => Object.assign({}, { parse: f }, {
+    map: <B>(fab: (a: O) => B): ParserFor<B, I> => parserFor<B, I>(u => ParserResult.map(f(u))(fab)),
+    subflatMap: <B>(fb: (t: O) => ParserResult<B>) => parserFor<B, I>(u => ParserResult.match(f(u))({
+        invalid: e => e,
+        valid: v => fb(v.result)
+    })),
+    flatMap: <B>(fb: (t: O) => ParserFor<B>) => parserFor<B, I>(u => ParserResult.match(f(u))({
+        invalid: e => e,
+        valid: v => fb(v.result).parse(u)
+    })),
+    then: <B>(other: ParserFor<B, O>) => parserFor<B, I>(u => ParserResult.match(f(u))({
+        invalid: e => e,
+        valid: v => other.parse(v.result)
+    })),
+    or: <B>(other: ParserFor<B, I>) => parserFor<O | B, I>(u => ParserResult.match(f(u))({
+        invalid: e => ParserResult.match(other.parse(u))({
+            invalid: eo => ParserResult.invalid(concat(e.errors, eo.errors)),
+            valid: vo => vo
+        }),
+        valid: v => v
+    })),
+    optional: (): ParserFor<O | undefined, I> => parserFor<O | undefined, I>(a => a ? f(a) : ParserResult.valid(undefined)),
+    required: (): ParserFor<Exclude<O, undefined | null>, I> => parserFor<Exclude<O, undefined | null>, I>(a => a ? f(a) as ParserResult<Exclude<O, undefined | null>> : ParserResult.invalid<Exclude<O, undefined | null>>(cons({ reason: "Required value is empty", originalValue: undefined })))
+})
 
 export const Parsers = {
-    string: Parser.for<string>(a => ParserResult.when(typeof a === 'string' || a instanceof String)(a as string, { originalValue: a, reason: `Expected string. Got: ${a}` })),
-    matches: (pattern: string | RegExp): ParserFor<string> => Parser.for<string, string>(s => (new RegExp(pattern).test(s)) ?  ParserResult.valid(s) : ParserResult.invalid({head: {reason: `Expected value ${s} to match ${pattern}`, originalValue: s}, tail: []})),
-    toString: Parser.for(a => ParserResult.valid(a.toString())),
-    number: Parser.for<number>(a => ParserResult.when(typeof a === 'number')(a as number, { originalValue: a, reason: `Expected number. Got: ${a}` })),
-    parseInt: Parser.for<number, string>(a => {
+    from: parserFor,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    lit: <A, I = any>(a: A): ParserFor<A, I> => parserFor(() => ParserResult.valid(a)),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    failure: <A, I = any>(e: ParserError): ParserFor<A, I> => parserFor(() => ParserResult.invalid<A>(cons(e))),
+    any: parserFor(a => a),
+    string: parserFor<string>(a => ParserResult.when(typeof a === 'string' || a instanceof String)(a as string, { originalValue: a, reason: `Expected string. Got: ${a}` })),
+    matches: (pattern: string | RegExp): ParserFor<string, string> => parserFor<string, string>(s => (new RegExp(pattern).test(s)) ? ParserResult.valid(s) : ParserResult.invalid(cons({ reason: `Expected value ${s} to match ${pattern}`, originalValue: s }))),
+    toString: parserFor(a => ParserResult.valid(a.toString())),
+    number: parserFor<number>(a => ParserResult.when(typeof a === 'number')(a as number, { originalValue: a, reason: `Expected number. Got: ${a}` })),
+    parseInt: parserFor<number, string>(a => {
         const i = parseInt(a)
         return ParserResult.when(!isNaN(i))(i, { originalValue: a, reason: `Expected valid int. Got: ${a}` })
     }),
-    parseFloat: Parser.for<number, string>(a => {
+    parseFloat: parserFor<number, string>(a => {
         const i = parseFloat(a)
         return ParserResult.when(!isNaN(i))(i, { originalValue: a, reason: `Expected valid float. Got: ${a}` })
     }),
-    bool: Parser.for<boolean>(a => ParserResult.when(typeof a === 'boolean')(a as boolean, { originalValue: a, reason: `Expected boolean. Got: ${a}` })),
-    array: <A>(pa: Factory<ParserFor<A>>): ParserFor<readonly A[]> => Parser.for(u =>
+    bool: parserFor<boolean>(a => ParserResult.when(typeof a === 'boolean')(a as boolean, { originalValue: a, reason: `Expected boolean. Got: ${a}` })),
+    array: <A>(pa: Factory<ParserFor<A>>): ParserFor<readonly A[]> => parserFor(u =>
         !Array.isArray(u) ?
-            ParserResult.invalid({ head: { reason: `Expected an array, Got: ${u}`, originalValue: u }, tail: [] }) :
-            u.reduce((p, n) => p.product(fromFactory(pa).parse(n)).map(flatten), ParserResult.valid([]))
+            ParserResult.invalid(cons({ reason: `Expected an array, Got: ${u}`, originalValue: u })) :
+            u.reduce((p, n) => ParserResult.map(ParserResult.product(p)(fromFactory(pa).parse(n)))(flatten), ParserResult.valid([] as readonly A[]))
     ),
-    parseBool: Parser.for<boolean, string>(a => {
+    parseBool: parserFor<boolean, string>(a => {
         const i = a == "true" ? true : a == "false" ? false : undefined
-        return ParserResult.when(i !== undefined)(i, { originalValue: a, reason: `Expected valid bool. Got: ${a}` })
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        return ParserResult.when(i !== undefined)(i!, { originalValue: a, reason: `Expected valid bool. Got: ${a}` })
     }),
-    parseDate: Parser.for<Date, string>(a => {
+    parseDate: parserFor<Date, string>(a => {
         const i = Date.parse(a)
         return ParserResult.when(!isNaN(i))(new Date(i), { originalValue: a, reason: `Expected valid float. Got: ${a}` })
     }),
-    for: <T>(parser: { readonly [k in keyof T]: (ParserFor<T[k]> | (() => ParserFor<T[k]>)) }): ParserFor<T, unknown> => Parser.for(o => {
+    for: <T>(parser: { readonly [k in keyof T]: (ParserFor<T[k]> | (() => ParserFor<T[k]>)) }): ParserFor<T> => parserFor(o => {
         type KeyValuePair = { readonly key: string, readonly value: T[keyof T] }
         const [head, ...tail] = Object.keys(parser)
         const results = tail.reduce<ParserResult<readonly KeyValuePair[]>>((p, n) => {
             const k = n as keyof T
-            const next = fromFactory(parser[k]).parse(o[k]).map<KeyValuePair>(a => ({ key: n, value: a }))
-            return p.product(next).map(t => flatten(t))
-        }, fromFactory(parser[head as keyof T]).parse(o[head]).map<readonly KeyValuePair[]>(a => ([{ key: head, value: a }])))
+            const next = ParserResult.map(fromFactory(parser[k]).parse(o[k]))(a => ({ key: n, value: a }))
+            return ParserResult.map(ParserResult.product(p)(next))(t => flatten(t))
+        }, ParserResult.map(fromFactory(parser[head as keyof T]).parse(o[head]))(a => ([{ key: head, value: a }])))
 
-        return results.map((r) => r.reduce((p, n) => Object.assign({}, p, { [n.key]: n.value }), {} as T))
+        return ParserResult.map(results)((r) => r.reduce((p, n) => Object.assign({}, p, { [n.key]: n.value }), {} as T))
     })
 }

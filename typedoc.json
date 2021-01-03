@@ -1,0 +1,5 @@
+{
+  "name": "Funkidation",
+  "entryPoints": ["packages/core/src/index.ts", "packages/fp-ts/src/index.ts"],
+  "out": "docs"
+}

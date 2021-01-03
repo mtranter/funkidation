@@ -2,15 +2,21 @@
   "name": "root",
   "private": true,
   "license": "MIT",
+  "workspaces": [
+    "packages/core",
+    "packages/fp-ts"
+  ],
   "devDependencies": {
     "husky": "^4.3.6",
-    "lerna": "^3.22.1"
+    "lerna": "^3.22.1",
+    "typedoc": "^0.20.5"
   },
   "scripts": {
     "build": "lerna run build",
     "test": "lerna run test",
+    "prepare-release": "lerna run prepare-release",
     "lint": "lerna run lint",
-    "prepare-release": "lerna run prepare-release"
+    "doc:html": "typedoc"
   },
   "husky": {
     "hooks": {

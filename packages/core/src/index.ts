@@ -1,1 +1,2 @@
-export { Parsers, ParserResult, ParserSuccess, ParserFailure, ParserError, ParserErrors, NonEmptyList } from './lib/parsers'
+export { Parsers, ParserFor, ParserResult, ParserSuccess, ParserFailure, ParserError, ParserErrors, ParsedType } from './lib/parsers'
+export * as NonEmptyArray from './lib/non-empty-array'
