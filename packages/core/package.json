@@ -1,5 +1,5 @@
 {
-  "name": "funkidation-core",
+  "name": "@mtranter/funkidation-core",
   "description": "Functional, typesafe parsing library for typescript",
   "main": "dist/index.js",
   "version": "1.0.1",
