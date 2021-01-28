@@ -6,6 +6,9 @@
   "author": "Mark Tranter",
   "license": "MIT",
   "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
@@ -33,5 +36,6 @@
     "ts-jest": "^26.4.4",
     "typedoc": "^0.20.5",
     "typescript": "^4.1.3"
-  }
+  },
+  "gitHead": "d30946157a8f8c1826c42b940e5ceb00dc9a29a5"
 }
